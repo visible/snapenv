@@ -94,6 +94,16 @@
   const snap = createSnap({ prefix: "MY_APP_" })
   const env = snap({ ... })
 
+> .env files?
+
+  snapenv validates, it doesn't load
+  use your runtime's native .env support:
+
+  bun app.ts                        # bun auto-loads .env
+  node --env-file=.env app.js       # node 20.6+
+  deno run --env-file=.env app.ts   # deno
+  node -r dotenv/config app.js      # older node
+
 > install?
 
   bun add snapenv
