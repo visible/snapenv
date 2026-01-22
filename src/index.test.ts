@@ -1,5 +1,5 @@
 import { expect, test, describe } from "bun:test"
-import { snap, validate } from "./index"
+import { snap, validate, extend, pick, omit, makeValidator, regex } from "./index"
 
 describe("snap", () => {
   describe("string", () => {
@@ -383,5 +383,120 @@ describe("edge cases", () => {
   test("host with subdomain", () => {
     const env = snap({ HOST: "host" }, { source: { HOST: "api.v2.example.com" } })
     expect(env.HOST).toBe("api.v2.example.com")
+  })
+})
+
+describe("extend", () => {
+  test("merges two env objects", () => {
+    const server = snap({ PORT: "port!" }, { source: { PORT: "3000" } })
+    const client = snap({ API_URL: "url!" }, { source: { API_URL: "https://api.com" } })
+    const env = extend(server, client)
+    expect(env.PORT).toBe(3000)
+    expect(env.API_URL).toBe("https://api.com")
+  })
+
+  test("later values override", () => {
+    const a = { FOO: "a" }
+    const b = { FOO: "b" }
+    const result = extend(a, b)
+    expect(result.FOO).toBe("b")
+  })
+})
+
+describe("pick", () => {
+  test("picks specific keys", () => {
+    const env = snap(
+      { PORT: "port!", HOST: "host!", DEBUG: "boolean" },
+      { source: { PORT: "3000", HOST: "localhost", DEBUG: "true" } }
+    )
+    const picked = pick(env, ["PORT", "HOST"])
+    expect(picked.PORT).toBe(3000)
+    expect(picked.HOST).toBe("localhost")
+    expect("DEBUG" in picked).toBe(false)
+  })
+})
+
+describe("omit", () => {
+  test("omits specific keys", () => {
+    const env = snap(
+      { PORT: "port!", HOST: "host!", SECRET: "string!" },
+      { source: { PORT: "3000", HOST: "localhost", SECRET: "abc123" } }
+    )
+    const safe = omit(env, ["SECRET"])
+    expect(safe.PORT).toBe(3000)
+    expect(safe.HOST).toBe("localhost")
+    expect("SECRET" in safe).toBe(false)
+  })
+})
+
+describe("makeValidator", () => {
+  test("creates custom validator", () => {
+    const hex = makeValidator<string>((value) => {
+      if (!/^#[0-9a-f]{6}$/i.test(value)) {
+        throw new Error("must be a hex color")
+      }
+      return value
+    })
+    const env = snap({ COLOR: hex }, { source: { COLOR: "#ff0000" } })
+    expect(env.COLOR).toBe("#ff0000")
+  })
+
+  test("custom validator throws on invalid", () => {
+    const hex = makeValidator<string>(
+      (value) => {
+        if (!/^#[0-9a-f]{6}$/i.test(value)) {
+          throw new Error("must be a hex color")
+        }
+        return value
+      },
+      { required: true }
+    )
+    expect(() => snap({ COLOR: hex }, { source: { COLOR: "red" } })).toThrow()
+  })
+
+  test("custom validator with required", () => {
+    const hex = makeValidator<string>((v) => v, { required: true })
+    expect(() => snap({ COLOR: hex }, { source: {} })).toThrow()
+  })
+
+  test("custom validator optional", () => {
+    const hex = makeValidator<string>((v) => v)
+    const env = snap({ COLOR: hex }, { source: {} })
+    expect(env.COLOR).toBeUndefined()
+  })
+})
+
+describe("regex", () => {
+  test("validates against pattern", () => {
+    const env = snap(
+      { CODE: regex(/^[A-Z]{3}-\d{3}$/) },
+      { source: { CODE: "ABC-123" } }
+    )
+    expect(env.CODE).toBe("ABC-123")
+  })
+
+  test("throws on invalid pattern", () => {
+    expect(() =>
+      snap(
+        { CODE: regex(/^[A-Z]{3}-\d{3}$/, { required: true }) },
+        { source: { CODE: "invalid" } }
+      )
+    ).toThrow()
+  })
+
+  test("custom error message", () => {
+    try {
+      snap(
+        { CODE: regex(/^[A-Z]+$/, { required: true, error: "must be uppercase letters" }) },
+        { source: { CODE: "abc" } }
+      )
+    } catch (e) {
+      expect((e as Error).message).toContain("must be uppercase letters")
+    }
+  })
+
+  test("optional regex", () => {
+    const env = snap({ CODE: regex(/^[A-Z]+$/) }, { source: {} })
+    expect(env.CODE).toBeUndefined()
   })
 })

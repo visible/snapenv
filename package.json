@@ -1,6 +1,6 @@
 {
   "name": "snapenv",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "typesafe env validation with zero dependencies",
   "type": "module",
   "sideEffects": false,

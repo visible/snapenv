@@ -28,7 +28,13 @@ type BaseType =
 
 type WithDefault<T extends string> = `${T}=${string}`
 
-type EnvType = BaseType | WithDefault<BaseType> | readonly string[]
+type Validator<T = unknown> = {
+  __validator: true
+  parse: (value: string | undefined, key: string) => { value: T; error?: string }
+  required: boolean
+}
+
+type EnvType = BaseType | WithDefault<BaseType> | readonly string[] | Validator<unknown>
 
 type EnvSchema = Record<string, EnvType>
 
@@ -60,13 +66,17 @@ type BaseToType<T extends string> = T extends "string" | "string!"
               ? number[]
               : string
 
-type InferType<T extends EnvType> = T extends readonly string[]
-  ? T[number]
-  : T extends string
-    ? IsRequired<T> extends true
-      ? BaseToType<ExtractBase<T>>
-      : BaseToType<ExtractBase<T>> | undefined
-    : never
+type InferType<T extends EnvType> = T extends Validator<infer U>
+  ? T extends { required: true }
+    ? U
+    : U | undefined
+  : T extends readonly string[]
+    ? T[number]
+    : T extends string
+      ? IsRequired<T> extends true
+        ? BaseToType<ExtractBase<T>>
+        : BaseToType<ExtractBase<T>> | undefined
+      : never
 
 type InferEnv<T extends EnvSchema> = {
   readonly [K in keyof T]: InferType<T[K]>
@@ -87,6 +97,10 @@ const patterns = {
 }
 
 const secretKeys = /secret|password|token|key|api|auth|credential|private/i
+
+function isValidator(type: EnvType): type is Validator<unknown> {
+  return typeof type === "object" && !Array.isArray(type) && "__validator" in type
+}
 
 function extractType(type: string): { base: string; required: boolean; defaultValue?: string } {
   const hasDefault = type.includes("=")
@@ -116,6 +130,10 @@ function parse(
   emptyAsUndefined: boolean,
   maskSecrets: boolean
 ): { value: unknown; error?: string } {
+  if (isValidator(type)) {
+    return type.parse(value, key)
+  }
+
   if (Array.isArray(type)) {
     if (value === undefined || (emptyAsUndefined && value === "")) {
       return { value: undefined, error: `required, must be one of: ${type.join(", ")}` }
@@ -294,4 +312,62 @@ export function validate<T extends EnvSchema>(
   return { success: true, data } as ValidateResult<T>
 }
 
-export type { EnvSchema, EnvType, InferEnv, Options }
+export function extend<A extends object, B extends object>(a: A, b: B): A & B {
+  return Object.freeze({ ...a, ...b }) as A & B
+}
+
+export function pick<T extends object, K extends keyof T>(obj: T, keys: K[]): Pick<T, K> {
+  const result = {} as Pick<T, K>
+  for (const key of keys) {
+    if (key in obj) {
+      result[key] = obj[key]
+    }
+  }
+  return Object.freeze(result) as Pick<T, K>
+}
+
+export function omit<T extends object, K extends keyof T>(obj: T, keys: K[]): Omit<T, K> {
+  const result = { ...obj }
+  for (const key of keys) {
+    delete result[key]
+  }
+  return Object.freeze(result) as Omit<T, K>
+}
+
+export function makeValidator<T>(
+  fn: (value: string) => T,
+  options: { required?: boolean; error?: string } = {}
+): Validator<T> {
+  const required = options.required ?? false
+  return {
+    __validator: true,
+    required,
+    parse: (value: string | undefined, key: string) => {
+      if (value === undefined || value === "") {
+        if (required) {
+          return { value: undefined as T, error: "required but not set" }
+        }
+        return { value: undefined as T }
+      }
+      try {
+        return { value: fn(value) }
+      } catch (e) {
+        return { value: undefined as T, error: options.error ?? (e as Error).message }
+      }
+    },
+  }
+}
+
+export function regex(pattern: RegExp, options: { required?: boolean; error?: string } = {}) {
+  return makeValidator<string>(
+    (value) => {
+      if (!pattern.test(value)) {
+        throw new Error(options.error ?? `must match pattern ${pattern}`)
+      }
+      return value
+    },
+    { required: options.required, error: options.error }
+  )
+}
+
+export type { EnvSchema, EnvType, InferEnv, Options, Validator }

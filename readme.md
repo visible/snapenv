@@ -37,6 +37,8 @@
   ✓ default values
   ✓ prefix support (NEXT_PUBLIC_, VITE_)
   ✓ secret masking in errors
+  ✓ custom validators
+  ✓ extend/pick/omit utilities
   ✓ works everywhere (node, deno, bun, edge)
 
 > types?
@@ -59,6 +61,38 @@
   add ! to make required: number!, url!, email!
   add =value for defaults: port=3000, boolean=false
 
+> custom validators?
+
+  import { snap, makeValidator, regex } from "snapenv"
+
+  // regex shorthand
+  const env = snap({
+    CODE: regex(/^[A-Z]{3}-\d{3}$/, { required: true }),
+  })
+
+  // fully custom
+  const hex = makeValidator<string>((value) => {
+    if (!/^#[0-9a-f]{6}$/i.test(value)) {
+      throw new Error("must be a hex color")
+    }
+    return value
+  }, { required: true })
+
+  const env = snap({ COLOR: hex })
+
+> extend/pick/omit?
+
+  // monorepo: combine server + client env
+  const server = snap({ DATABASE_URL: "url!" })
+  const client = snap({ API_URL: "url!" }, { prefix: "NEXT_PUBLIC_" })
+  const env = extend(server, client)
+
+  // pick subset
+  const public = pick(env, ["API_URL"])
+
+  // omit sensitive
+  const safe = omit(env, ["DATABASE_URL"])
+
 > options?
 
   snap(schema, {
@@ -78,16 +112,6 @@
   } else {
     console.log(result.errors)
   }
-
-> prefix example?
-
-  // reads NEXT_PUBLIC_API_URL from env
-  const env = snap(
-    { API_URL: "url!" },
-    { prefix: "NEXT_PUBLIC_" }
-  )
-
-  env.API_URL // typed without prefix
 
 > createSnap?
 
