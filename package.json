@@ -1,8 +1,9 @@
 {
   "name": "snapenv",
-  "version": "0.0.1",
-  "description": "env var validation and types",
+  "version": "0.1.0",
+  "description": "typesafe env validation with zero dependencies",
   "type": "module",
+  "sideEffects": false,
   "main": "dist/index.js",
   "module": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -30,8 +31,15 @@
     "typescript",
     "types",
     "dotenv",
-    "config"
+    "config",
+    "typesafe",
+    "schema",
+    "parse",
+    "process.env"
   ],
+  "engines": {
+    "node": ">=18"
+  },
   "author": "Visible",
   "license": "MIT",
   "repository": {
