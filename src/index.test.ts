@@ -332,3 +332,56 @@ describe("validate", () => {
     }
   })
 })
+
+describe("edge cases", () => {
+  test("handles scientific notation", () => {
+    const env = snap({ NUM: "number" }, { source: { NUM: "1e10" } })
+    expect(env.NUM).toBe(1e10)
+  })
+
+  test("accepts url with port and query", () => {
+    const env = snap({ URL: "url" }, { source: { URL: "http://localhost:3000?foo=bar" } })
+    expect(env.URL).toBe("http://localhost:3000?foo=bar")
+  })
+
+  test("accepts email with plus and dots", () => {
+    const env = snap({ EMAIL: "email" }, { source: { EMAIL: "first.last+tag@mail.example.com" } })
+    expect(env.EMAIL).toBe("first.last+tag@mail.example.com")
+  })
+
+  test("handles nested json", () => {
+    const env = snap({ CFG: "json" }, { source: { CFG: '{"a":{"b":1}}' } })
+    expect(env.CFG).toEqual({ a: { b: 1 } })
+  })
+
+  test("handles json primitives", () => {
+    expect(snap({ V: "json" }, { source: { V: "null" } }).V).toBe(null)
+    expect(snap({ V: "json" }, { source: { V: "true" } }).V).toBe(true)
+    expect(snap({ V: "json" }, { source: { V: "42" } }).V).toBe(42)
+  })
+
+  test("uuid case insensitive", () => {
+    const env = snap({ ID: "uuid" }, { source: { ID: "550E8400-e29b-41D4-a716-446655440000" } })
+    expect(env.ID).toBe("550E8400-e29b-41D4-a716-446655440000")
+  })
+
+  test("single item array", () => {
+    const env = snap({ TAGS: "string[]" }, { source: { TAGS: "one" } })
+    expect(env.TAGS).toEqual(["one"])
+  })
+
+  test("trims array items", () => {
+    const env = snap({ TAGS: "string[]" }, { source: { TAGS: " a , b , c " } })
+    expect(env.TAGS).toEqual(["a", "b", "c"])
+  })
+
+  test("default with special chars", () => {
+    const env = snap({ URL: "string=https://example.com?foo=bar" }, { source: {} })
+    expect(env.URL).toBe("https://example.com?foo=bar")
+  })
+
+  test("host with subdomain", () => {
+    const env = snap({ HOST: "host" }, { source: { HOST: "api.v2.example.com" } })
+    expect(env.HOST).toBe("api.v2.example.com")
+  })
+})
