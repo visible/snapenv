@@ -1,5 +1,5 @@
 import { expect, test, describe } from "bun:test"
-import { snap } from "./index"
+import { snap, validate } from "./index"
 
 describe("snap", () => {
   describe("string", () => {
@@ -243,6 +243,51 @@ describe("snap", () => {
     })
   })
 
+  describe("arrays", () => {
+    test("parses string array", () => {
+      const env = snap({ TAGS: "string[]" }, { source: { TAGS: "a, b, c" } })
+      expect(env.TAGS).toEqual(["a", "b", "c"])
+    })
+
+    test("parses number array", () => {
+      const env = snap({ PORTS: "number[]" }, { source: { PORTS: "80, 443, 8080" } })
+      expect(env.PORTS).toEqual([80, 443, 8080])
+    })
+
+    test("invalid number array throws", () => {
+      expect(() => snap({ PORTS: "number[]!" }, { source: { PORTS: "80, abc" } })).toThrow()
+    })
+  })
+
+  describe("prefix", () => {
+    test("reads with prefix", () => {
+      const env = snap(
+        { API_URL: "url!" },
+        { source: { NEXT_PUBLIC_API_URL: "https://api.com" }, prefix: "NEXT_PUBLIC_" }
+      )
+      expect(env.API_URL).toBe("https://api.com")
+    })
+  })
+
+  describe("maskSecrets", () => {
+    test("masks secret keys in errors", () => {
+      try {
+        snap({ API_KEY: "number!" }, { source: { API_KEY: "secret123" }, maskSecrets: true })
+      } catch (e) {
+        expect((e as Error).message).toContain("[MASKED]")
+        expect((e as Error).message).not.toContain("secret123")
+      }
+    })
+
+    test("does not mask non-secret keys", () => {
+      try {
+        snap({ PORT: "number!" }, { source: { PORT: "abc" }, maskSecrets: true })
+      } catch (e) {
+        expect((e as Error).message).toContain("abc")
+      }
+    })
+  })
+
   describe("error messages", () => {
     test("includes variable name", () => {
       try {
@@ -259,5 +304,31 @@ describe("snap", () => {
         expect((e as Error).message).toContain("abc")
       }
     })
+  })
+})
+
+describe("validate", () => {
+  test("returns success with valid data", () => {
+    const result = validate({ PORT: "port!" }, { source: { PORT: "3000" } })
+    expect(result.success).toBe(true)
+    if (result.success) {
+      expect(result.data.PORT).toBe(3000)
+    }
+  })
+
+  test("returns errors without throwing", () => {
+    const result = validate({ PORT: "port!" }, { source: {} })
+    expect(result.success).toBe(false)
+    if (!result.success) {
+      expect(result.errors.length).toBeGreaterThan(0)
+    }
+  })
+
+  test("returns multiple errors", () => {
+    const result = validate({ A: "string!", B: "number!" }, { source: {} })
+    expect(result.success).toBe(false)
+    if (!result.success) {
+      expect(result.errors.length).toBe(2)
+    }
   })
 })

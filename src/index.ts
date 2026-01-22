@@ -21,6 +21,10 @@ type BaseType =
   | "uuid!"
   | "json"
   | "json!"
+  | "string[]"
+  | "string[]!"
+  | "number[]"
+  | "number[]!"
 
 type WithDefault<T extends string> = `${T}=${string}`
 
@@ -50,7 +54,11 @@ type BaseToType<T extends string> = T extends "string" | "string!"
         ? string
         : T extends "json" | "json!"
           ? unknown
-          : string
+          : T extends "string[]" | "string[]!"
+            ? string[]
+            : T extends "number[]" | "number[]!"
+              ? number[]
+              : string
 
 type InferType<T extends EnvType> = T extends readonly string[]
   ? T[number]
@@ -66,8 +74,10 @@ type InferEnv<T extends EnvSchema> = {
 
 type Options = {
   source?: Record<string, string | undefined>
+  prefix?: string
   onError?: "throw" | "log" | ((errors: string[]) => void)
   emptyAsUndefined?: boolean
+  maskSecrets?: boolean
 }
 
 const patterns = {
@@ -75,6 +85,8 @@ const patterns = {
   uuid: /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
   host: /^(?:(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}|localhost|\d{1,3}(?:\.\d{1,3}){3})$/i,
 }
+
+const secretKeys = /secret|password|token|key|api|auth|credential|private/i
 
 function extractType(type: string): { base: string; required: boolean; defaultValue?: string } {
   const hasDefault = type.includes("=")
@@ -91,18 +103,25 @@ function extractType(type: string): { base: string; required: boolean; defaultVa
   return { base, required, defaultValue: undefined }
 }
 
+function mask(value: string, key: string, shouldMask: boolean): string {
+  if (!shouldMask) return `"${value}"`
+  if (secretKeys.test(key)) return '"[MASKED]"'
+  return `"${value}"`
+}
+
 function parse(
   value: string | undefined,
   type: EnvType,
   key: string,
-  emptyAsUndefined: boolean
+  emptyAsUndefined: boolean,
+  maskSecrets: boolean
 ): { value: unknown; error?: string } {
   if (Array.isArray(type)) {
     if (value === undefined || (emptyAsUndefined && value === "")) {
       return { value: undefined, error: `required, must be one of: ${type.join(", ")}` }
     }
     if (!type.includes(value)) {
-      return { value: undefined, error: `must be one of: ${type.join(", ")}, got "${value}"` }
+      return { value: undefined, error: `must be one of: ${type.join(", ")}, got ${mask(value, key, maskSecrets)}` }
     }
     return { value }
   }
@@ -128,7 +147,7 @@ function parse(
     case "number": {
       const num = Number(raw)
       if (isNaN(num)) {
-        return { value: undefined, error: `must be a number, got "${raw}"` }
+        return { value: undefined, error: `must be a number, got ${mask(raw, key, maskSecrets)}` }
       }
       return { value: num }
     }
@@ -136,7 +155,7 @@ function parse(
     case "integer": {
       const num = Number(raw)
       if (isNaN(num) || !Number.isInteger(num)) {
-        return { value: undefined, error: `must be an integer, got "${raw}"` }
+        return { value: undefined, error: `must be an integer, got ${mask(raw, key, maskSecrets)}` }
       }
       return { value: num }
     }
@@ -144,7 +163,7 @@ function parse(
     case "port": {
       const port = Number(raw)
       if (isNaN(port) || !Number.isInteger(port) || port < 1 || port > 65535) {
-        return { value: undefined, error: `must be a valid port (1-65535), got "${raw}"` }
+        return { value: undefined, error: `must be a valid port (1-65535), got ${mask(raw, key, maskSecrets)}` }
       }
       return { value: port }
     }
@@ -153,7 +172,7 @@ function parse(
       const lower = raw.toLowerCase()
       if (["true", "1", "yes", "on"].includes(lower)) return { value: true }
       if (["false", "0", "no", "off"].includes(lower)) return { value: false }
-      return { value: undefined, error: `must be a boolean, got "${raw}"` }
+      return { value: undefined, error: `must be a boolean, got ${mask(raw, key, maskSecrets)}` }
     }
 
     case "url":
@@ -161,24 +180,24 @@ function parse(
         new URL(raw)
         return { value: raw }
       } catch {
-        return { value: undefined, error: `must be a valid URL, got "${raw}"` }
+        return { value: undefined, error: `must be a valid URL, got ${mask(raw, key, maskSecrets)}` }
       }
 
     case "email":
       if (!patterns.email.test(raw)) {
-        return { value: undefined, error: `must be a valid email, got "${raw}"` }
+        return { value: undefined, error: `must be a valid email, got ${mask(raw, key, maskSecrets)}` }
       }
       return { value: raw }
 
     case "host":
       if (!patterns.host.test(raw)) {
-        return { value: undefined, error: `must be a valid host, got "${raw}"` }
+        return { value: undefined, error: `must be a valid host, got ${mask(raw, key, maskSecrets)}` }
       }
       return { value: raw }
 
     case "uuid":
       if (!patterns.uuid.test(raw)) {
-        return { value: undefined, error: `must be a valid UUID, got "${raw}"` }
+        return { value: undefined, error: `must be a valid UUID, got ${mask(raw, key, maskSecrets)}` }
       }
       return { value: raw }
 
@@ -186,8 +205,26 @@ function parse(
       try {
         return { value: JSON.parse(raw) }
       } catch {
-        return { value: undefined, error: `must be valid JSON, got "${raw}"` }
+        return { value: undefined, error: `must be valid JSON, got ${mask(raw, key, maskSecrets)}` }
       }
+
+    case "string[]": {
+      const items = raw.split(",").map((s) => s.trim())
+      return { value: items }
+    }
+
+    case "number[]": {
+      const items = raw.split(",").map((s) => s.trim())
+      const nums: number[] = []
+      for (const item of items) {
+        const num = Number(item)
+        if (isNaN(num)) {
+          return { value: undefined, error: `must be comma-separated numbers, got ${mask(raw, key, maskSecrets)}` }
+        }
+        nums.push(num)
+      }
+      return { value: nums }
+    }
 
     default:
       return { value: raw }
@@ -207,13 +244,16 @@ function getEnvSource(): Record<string, string | undefined> {
 export function snap<T extends EnvSchema>(schema: T, options: Options = {}): InferEnv<T> {
   const source = options.source ?? getEnvSource()
   const emptyAsUndefined = options.emptyAsUndefined ?? true
+  const maskSecrets = options.maskSecrets ?? false
+  const prefix = options.prefix ?? ""
   const result: Record<string, unknown> = {}
   const errors: string[] = []
 
   for (const [key, type] of Object.entries(schema)) {
-    const { value, error } = parse(source[key], type as EnvType, key, emptyAsUndefined)
+    const envKey = prefix + key
+    const { value, error } = parse(source[envKey], type as EnvType, key, emptyAsUndefined, maskSecrets)
     if (error) {
-      errors.push(`${key}: ${error}`)
+      errors.push(`${envKey}: ${error}`)
     } else {
       result[key] = value
     }
@@ -236,6 +276,22 @@ export function snap<T extends EnvSchema>(schema: T, options: Options = {}): Inf
 export function createSnap(defaultOptions: Options) {
   return <T extends EnvSchema>(schema: T, options: Options = {}) =>
     snap(schema, { ...defaultOptions, ...options })
+}
+
+type ValidateResult<T extends EnvSchema> =
+  | { success: true; data: InferEnv<T>; errors: never }
+  | { success: false; data: never; errors: string[] }
+
+export function validate<T extends EnvSchema>(
+  schema: T,
+  options: Omit<Options, "onError"> = {}
+): ValidateResult<T> {
+  const errors: string[] = []
+  const data = snap(schema, { ...options, onError: (e) => errors.push(...e) })
+  if (errors.length > 0) {
+    return { success: false, errors } as ValidateResult<T>
+  }
+  return { success: true, data } as ValidateResult<T>
 }
 
 export type { EnvSchema, EnvType, InferEnv, Options }
